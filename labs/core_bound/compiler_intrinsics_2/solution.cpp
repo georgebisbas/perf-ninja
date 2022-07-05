@@ -3,20 +3,29 @@
 #include <cstdint>
 #include <iostream>
 
-inline uint64_t PopCnt(uint64_t n) {
-#ifdef _MSC_VER
-  return __popcnt64(n);
-#else
-  return __builtin_popcountll(n);
-#endif
+template <typename Uint>
+constexpr Uint PopulateByte(uint8_t b) {
+  Uint result = b;
+  for (size_t i = 1; i < sizeof(Uint); i *= 2) {
+    result = result | (result << i * 8);
+  }
+  return result;
 }
 
-inline bool ContainsZeroByte(uint64_t v) {
-  return ((v - UINT64_C(0x0101010101010101)) & ~v &
-          UINT64_C(0x8080808080808080)) != 0;
+constexpr uint64_t PopCount(uint64_t x) {
+  x = x - ((x >> 1) & PopulateByte<uint64_t>(0x55));
+  x = (x & PopulateByte<uint64_t>(0x33)) +
+      ((x >> 2) & PopulateByte<uint64_t>(0x33));
+  x = (x + (x >> 4)) & PopulateByte<uint64_t>(0x0F);
+  return x * PopulateByte<uint64_t>(0x01) >> 56;
 }
 
-inline uint64_t NLZ(uint64_t x) {
+constexpr bool ContainsZeroByte(uint64_t v) {
+  return ((v - PopulateByte<uint64_t>(0x01)) & ~v &
+          PopulateByte<uint64_t>(0x80)) != 0;
+}
+
+constexpr uint64_t Nlz(uint64_t x) {
   x = x | (x >> 1);
   x = x | (x >> 2);
   x = x | (x >> 4);
@@ -24,20 +33,18 @@ inline uint64_t NLZ(uint64_t x) {
   x = x | (x >> 16);
   x = x | (x >> 32);
 
-  return PopCnt(~x);
+  return PopCount(~x);
 }
 
-inline uint64_t NTZ(uint64_t x) {
-  constexpr uint64_t kMod37BitPosition[] = {
-      32, 0,  1,  26, 2,  23, 27, 0,  3, 16, 24, 30, 28, 11, 0,  13, 4,  7, 17,
-      0,  25, 22, 31, 15, 29, 10, 12, 6, 0,  21, 14, 9,  5,  20, 8,  19, 18};
-  if ((x & UINT64_C(0xFFFFFFFF)) == 0) {
-    uint32_t v = x >> 32;
-    return 32 + kMod37BitPosition[(-v & v) % 37];
-  } else {
-    uint32_t v = x;
-    return kMod37BitPosition[(-v & v) % 37];
-  }
+constexpr uint64_t Ntz(uint64_t x) {
+  return PopCount(~x & (x - 1));
+}
+
+constexpr uint64_t MarkZeroBytes(uint64_t x) {
+  uint64_t y =
+      ((x & PopulateByte<uint64_t>(0x7F)) + PopulateByte<uint64_t>(0x7F)) &
+      PopulateByte<uint64_t>(0x80);
+  return ~(y | x | PopulateByte<uint64_t>(0x7F));
 }
 
 unsigned solution(const std::string& inputContents) {
@@ -69,17 +76,14 @@ unsigned solution(const std::string& inputContents) {
     if (!ContainsZeroByte(masked)) {
       continue;
     }
-    const uint64_t tmp = ((masked & UINT64_C(0x7F7F7F7F7F7F7F7F)) +
-                          UINT64_C(0x7F7F7F7F7F7F7F7F)) &
-                         0x8080808080808080;
-    const uint64_t x80ed = ~(tmp | masked | UINT64_C(0x7F7F7F7F7F7F7F7F));
+    const uint64_t x80ed = MarkZeroBytes(masked);
     const char* pch = reinterpret_cast<const char*>(pu64);
     ptrdiff_t lsf = pch - last_line_beg;
     if (lsf + 8 >= longest) {
-      longest = std::max<ptrdiff_t>(longest, lsf + NTZ(x80ed) / 8);
+      longest = std::max<ptrdiff_t>(longest, lsf + Ntz(x80ed) / 8);
     }
 
-    last_line_beg = pch + 8 - NLZ(x80ed) / 8;
+    last_line_beg = pch + 8 - Nlz(x80ed) / 8;
   }
 
   const char* end_aligned = reinterpret_cast<const char*>(u64end_aligned);
